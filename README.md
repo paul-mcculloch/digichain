@@ -10,7 +10,7 @@ Export samples chains for the Octatrack, OP-1/OP-1 Field/OP-Z, Dirtywave M8 with
 
 Supports batch converting of files to a chosen bit depth and sample rate (mono/stereo).
 Choose the way stereo files get processed to mono, with Left, Right, Sum, and Difference (Side) with live preview of the choice from the sample list.
-Join the selected files together into a sample chain, with the option to pad all samples to be the same length for evenly sized slices (perfect for the Digitakt's fixed slice grids).
+Join the selected files together into a sample chain, with the option to pad/pitch shift/time stretch all samples to be the same length for evenly sized slices (perfect for the Digitakt's fixed slice grids).
 
 Use the simple editing tools to trim-right, normalize, reverse, or pitch up/down the samples.
 Batch operations for trim-right, normalize and reverse.
