@@ -38,7 +38,7 @@ jobs:
         with:
           target: shifted
           # Upload entire repository
-          path: '.'
+          path: '/src'
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
