@@ -16,7 +16,8 @@ import {
     showToastMessage,
     createDT2PresetBlob,
     sanitizeDT2Name, indexOfUint8Array,
-    pitchShift
+    pitchShift,
+    timeStretch
 } from './resources.js';
 import {
     drawWaveform,
@@ -1829,17 +1830,17 @@ function medianSelectedSampleLengthSeconds() {
     return Math.max(0.001, Number((medianLength / masterSR).toFixed(3)));
 }
 
-function updatePitchedChainLength(value) {
+function updateChainTargetLength(value) {
     const lengthSeconds = Number(value);
     if (!Number.isFinite(lengthSeconds) || lengthSeconds <= 0) {
         showToastMessage('Please enter a target length greater than zero seconds.');
-        const input = document.getElementById('pitchedChainLength');
-        input.value = Number(settings.pitchedChainLengthSeconds).toFixed(3);
+        const input = document.getElementById('chainTargetLength');
+        input.value = Number(settings.chainTargetLengthSeconds).toFixed(3);
         return;
     }
-    settings.pitchedChainLengthSeconds = Number(lengthSeconds.toFixed(3));
-    document.getElementById('pitchedChainLength').value =
-      settings.pitchedChainLengthSeconds.toFixed(3);
+    settings.chainTargetLengthSeconds = Number(lengthSeconds.toFixed(3));
+    document.getElementById('chainTargetLength').value =
+      settings.chainTargetLengthSeconds.toFixed(3);
 }
 
 function toggleChainModeMenu() {
@@ -1850,18 +1851,28 @@ function toggleChainModeMenu() {
 }
 
 function updateChainMode(mode, resetPitchedLength = true) {
-    if (!['normal', 'spaced', 'pitched'].includes(mode)) { return; }
+    if (!['normal', 'spaced', 'pitched', 'time-stretch'].includes(mode)) { return; }
     settings.chainMode = mode;
     const modeIcons = {
         normal: 'gg-stack',
         spaced: 'gg-carousel',
-        pitched: 'gg-arrows-v'
+        pitched: 'gg-arrows-v',
+        'time-stretch': 'gg-repeat'
     };
     const currentIcon = document.querySelector('.chain-mode-current-icon');
     currentIcon.className = `chain-mode-current-icon ${modeIcons[mode]}`;
+    const modeLabels = {
+        normal: 'Normal',
+        spaced: 'Spaced',
+        pitched: 'Pitched',
+        'time-stretch': 'Time stretch'
+    };
     const menu = document.querySelector('.chain-mode-options');
     menu.hidden = true;
-    document.querySelector('.chain-mode-trigger').setAttribute('aria-expanded', 'false');
+    const modeTrigger = document.querySelector('.chain-mode-trigger');
+    modeTrigger.setAttribute('aria-expanded', 'false');
+    modeTrigger.title = `Chain mode: ${modeLabels[mode]}. Click to choose another mode.`;
+    modeTrigger.setAttribute('aria-label', `Chain mode: ${modeLabels[mode]}`);
     document.querySelectorAll('.chain-mode-option').forEach(button => {
         const selected = button.dataset.mode === mode;
         button.classList.toggle('button', selected);
@@ -1869,18 +1880,22 @@ function updateChainMode(mode, resetPitchedLength = true) {
         button.setAttribute('aria-pressed', `${selected}`);
         button.setAttribute('aria-checked', `${selected}`);
     });
-    const lengthInput = document.getElementById('pitchedChainLength');
+    const lengthInput = document.getElementById('chainTargetLength');
     if (lengthInput) {
-        lengthInput.disabled = mode !== 'pitched';
-        const savedLength = Number(settings.pitchedChainLengthSeconds);
-        if (mode === 'pitched' &&
-          (resetPitchedLength || localStorage.getItem('pitchedChainLengthSeconds') === null ||
+        const usesTargetLength = mode === 'pitched' || mode === 'time-stretch';
+        lengthInput.disabled = !usesTargetLength;
+        const savedLength = Number(settings.chainTargetLengthSeconds);
+        if (usesTargetLength &&
+          (resetPitchedLength || localStorage.getItem('chainTargetLengthSeconds') === null ||
             !Number.isFinite(savedLength) || savedLength <= 0)) {
-            settings.pitchedChainLengthSeconds = medianSelectedSampleLengthSeconds();
+            settings.chainTargetLengthSeconds = medianSelectedSampleLengthSeconds();
         } else if (!Number.isFinite(savedLength) || savedLength <= 0) {
-            settings.pitchedChainLengthSeconds = medianSelectedSampleLengthSeconds();
+            settings.chainTargetLengthSeconds = medianSelectedSampleLengthSeconds();
         }
-        lengthInput.value = Number(settings.pitchedChainLengthSeconds).toFixed(3);
+        lengthInput.value = Number(settings.chainTargetLengthSeconds).toFixed(3);
+        lengthInput.title = `Target sample length in seconds for ${modeLabels[mode].toLowerCase()} chains.`;
+        lengthInput.setAttribute(
+          'aria-label', `Target sample length in seconds for ${modeLabels[mode].toLowerCase()} chains`);
     }
     const spacedEl = document.querySelector('button.dl-spaced');
     const chainEl = document.querySelector('button.dl-chain');
@@ -1891,12 +1906,17 @@ function updateChainMode(mode, resetPitchedLength = true) {
         const count = spacedLabel.dataset.joinCount || '0';
         const countText = count === '0' ? '-' : count;
         const chainWord = count === '1' ? 'Chain' : 'Chains';
+        const chainModeLabel = mode === 'pitched'
+          ? 'Pitched'
+          : mode === 'time-stretch' ? 'Stretched' : 'Spaced';
         spacedLabel.textContent =
-          ` ${countText} ${mode === 'pitched' ? 'Pitched' : 'Spaced'} ${chainWord}`;
+          ` ${countText} ${chainModeLabel} ${chainWord}`;
     }
     spacedEl.title = mode === 'pitched'
       ? 'Download selected chains with samples pitch-shifted to the target length. Shift-click adds the result to the sample list.'
-      : 'Download the selected samples joined, spaced evenly. Shift-click adds the result to the sample list.';
+      : mode === 'time-stretch'
+        ? 'Download selected chains with sample durations changed to the target length without changing pitch. Shift-click adds the result to the sample list.'
+        : 'Download the selected samples joined, spaced evenly. Shift-click adds the result to the sample list.';
     if (resetPitchedLength && mode !== 'normal' && settings.exportChainsAsPresets) {
         changePresetBundling(false);
     }
@@ -2716,14 +2736,14 @@ async function joinAllUICall(event, pad) {
       settings.updateResampleChainsToList && shiftPressed;
     const toInternal = !settings.exportChainsAsPresets && !preview &&
       (settings.updateResampleChainsToList || shiftPressed);
-    let pitchShiftTargetLength;
-    if (pad && settings.chainMode === 'pitched') {
-        const lengthSeconds = Number(document.getElementById('pitchedChainLength').value);
+    let targetSampleLength;
+    if (pad && ['pitched', 'time-stretch'].includes(settings.chainMode)) {
+        const lengthSeconds = Number(document.getElementById('chainTargetLength').value);
         if (!Number.isFinite(lengthSeconds) || lengthSeconds <= 0) {
             showToastMessage('Please enter a target length greater than zero seconds.');
             return;
         }
-        pitchShiftTargetLength = Math.max(1, Math.round(lengthSeconds * masterSR));
+        targetSampleLength = Math.max(1, Math.round(lengthSeconds * masterSR));
     }
     if (preview) {
         cancelChainPreview();
@@ -2733,13 +2753,13 @@ async function joinAllUICall(event, pad) {
     setLoadingText(preview ? 'Previewing chain (Esc to cancel)' : 'Processing');
     setTimeout(
       () => joinAll(
-        event, pad, [], 0, toInternal, false, pitchShiftTargetLength, preview, previewSession),
+        event, pad, [], 0, toInternal, false, targetSampleLength, preview, previewSession),
       500
     );
 }
 
-function pitchShiftFilesToLength(filesToShift, targetLength) {
-    return filesToShift.map(file => {
+function adjustFilesToLength(filesToAdjust, targetLength, bufferTransform) {
+    return filesToAdjust.map(file => {
         const scale = targetLength / file.buffer.length;
         const sourceSlices = file.meta.slices || metaFiles.getByFileInDcFormat(file);
         return {
@@ -2752,17 +2772,28 @@ function pitchShiftFilesToLength(filesToShift, targetLength) {
                     e: Math.round(slice.e * scale)
                 }))
             },
-            buffer: pitchShift({
-                buffer: file.buffer,
-                cents: 1200 * Math.log2(file.buffer.length / targetLength)
-            })
+            buffer: bufferTransform(file.buffer, scale)
         };
     });
 }
 
+function pitchShiftFilesToLength(filesToShift, targetLength) {
+    return adjustFilesToLength(filesToShift, targetLength, buffer =>
+        pitchShift({
+            buffer,
+            cents: 1200 * Math.log2(buffer.length / targetLength)
+        })
+    );
+}
+
+function timeStretchFilesToLength(filesToStretch, targetLength) {
+    return adjustFilesToLength(filesToStretch, targetLength, (buffer, scale) =>
+      timeStretch(buffer, scale));
+}
+
 async function joinAll(
   event, pad = false, filesRemaining = [], fileCount = 0,
-  toInternal = false, zip = false, pitchShiftTargetLength, preview = false, previewSession = null) {
+  toInternal = false, zip = false, targetSampleLength, preview = false, previewSession = null) {
     if (previewSession?.cancelled) {
         finishChainPreview(previewSession);
         return;
@@ -2855,9 +2886,12 @@ async function joinAll(
                     }
                 }
             }
-            if (pad && settings.chainMode === 'pitched' && pitchShiftTargetLength) {
-                _files = pitchShiftFilesToLength(_files, pitchShiftTargetLength);
-                largest = pitchShiftTargetLength;
+            if (pad && targetSampleLength &&
+              ['pitched', 'time-stretch'].includes(settings.chainMode)) {
+                _files = settings.chainMode === 'pitched'
+                  ? pitchShiftFilesToLength(_files, targetSampleLength)
+                  : timeStretchFilesToLength(_files, targetSampleLength);
+                largest = targetSampleLength;
             } else {
                 largest = _files.reduce(
                   (big, cur) => big > cur.buffer.length ? big : cur.buffer.length, 0);
@@ -2893,9 +2927,12 @@ async function joinAll(
             filesRemaining = processing.skipped;
             _files = processing.processed;
             if (pad) {
-                if (settings.chainMode === 'pitched' && pitchShiftTargetLength) {
-                    _files = pitchShiftFilesToLength(_files, pitchShiftTargetLength);
-                    largest = pitchShiftTargetLength;
+                if (targetSampleLength &&
+                  ['pitched', 'time-stretch'].includes(settings.chainMode)) {
+                    _files = settings.chainMode === 'pitched'
+                      ? pitchShiftFilesToLength(_files, targetSampleLength)
+                      : timeStretchFilesToLength(_files, targetSampleLength);
+                    largest = targetSampleLength;
                 } else {
                     largest = _files.reduce(
                       (big, cur) => big > cur.buffer.length ? big : cur.buffer.length, 0);
@@ -2941,12 +2978,15 @@ async function joinAll(
         const path = _files[0].file.path ? `${(_files[0].file.path || '').replace(
           /\//gi, '-')}` : '';
         const fileCountText = `${fileCount + 1}`.padStart(`${joinCount}`.length, '0');
+        const chainModeFilePrefix = settings.chainMode === 'pitched' && targetSampleLength
+          ? 'sc-ps-'
+          : settings.chainMode === 'time-stretch' && targetSampleLength ? 'sc-ts-' : 'sp-';
         const _fileName = chainFileNamesAvailable() ?
           getNextChainFileName(_files.length) :
           (
             settings.useDateNumberInPlaceOfFileName ?
-              `${path}dc-${pad ? (settings.chainMode === 'pitched' && pitchShiftTargetLength ? 'sc-ps-' : 'sp-') : ''}${Date.now()}-${fileCountText}--${_files.length}` :
-              `${path}dc-${pad ? (settings.chainMode === 'pitched' && pitchShiftTargetLength ? 'sc-ps-' : 'sp-') : ''}${getNiceFileName('', _files[0], true)}-${fileCountText}--${_files.length}`
+              `${path}dc-${pad ? chainModeFilePrefix : ''}${Date.now()}-${fileCountText}--${_files.length}` :
+              `${path}dc-${pad ? chainModeFilePrefix : ''}${getNiceFileName('', _files[0], true)}-${fileCountText}--${_files.length}`
           );
 
         if (settings.exportChainsAsPresets && settings.exportChainsAsPresets.device !== 'dt') {
@@ -3105,7 +3145,7 @@ async function joinAll(
             }
             fileCount++;
             await joinAll(
-              event, pad, filesRemaining, fileCount, toInternal, zip, pitchShiftTargetLength,
+              event, pad, filesRemaining, fileCount, toInternal, zip, targetSampleLength,
               preview, previewSession);
         } else {
             if (zip) {
@@ -4366,7 +4406,7 @@ function setCountValues() {
               el.textContent = ` ${
                 joinCount === 0
                   ? '-'
-                : joinCount}${idx === 0 ? (settings.chainMode === 'pitched' ? ' Pitched' : ' Spaced') : ''}${joinCount === 1
+                : joinCount}${idx === 0 ? (settings.chainMode === 'pitched' ? ' Pitched' : settings.chainMode === 'time-stretch' ? ' Stretched' : ' Spaced') : ''}${joinCount === 1
                 ? chainText
                 : chainText + 's'}`;
               el.dataset.joinCount = `${joinCount}`;
@@ -6606,6 +6646,11 @@ function init() {
       localStorage.getItem('spacedChainMode') !== null) {
         settings.chainMode = settings.spacedChainMode ? 'spaced' : 'normal';
     }
+    if (localStorage.getItem('chainTargetLengthSeconds') === null &&
+      localStorage.getItem('pitchedChainLengthSeconds') !== null) {
+        settings.chainTargetLengthSeconds = settings.pitchedChainLengthSeconds;
+        localStorage.removeItem('pitchedChainLengthSeconds');
+    }
     updateChainMode(settings.chainMode, false);
     updateUiButtonAction('updateResampleChainsToList', '.toggle-top-list');
     changePresetBundling(settings.exportChainsAsPresets?.device);
@@ -7218,7 +7263,7 @@ window.digichain = {
     toggleSecondsPerFile,
     updateChainMode,
     toggleChainModeMenu,
-    updatePitchedChainLength,
+    updateChainTargetLength,
     updateUiButtonAction,
     changePresetBundling,
     changeOpParam,

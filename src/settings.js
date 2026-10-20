@@ -14,7 +14,7 @@ const defaultSettings = {
     retainSessionState: true,
 
     chainMode: 'spaced',
-    pitchedChainLengthSeconds: 0.001,
+    chainTargetLengthSeconds: 0.001,
     updateResampleChainsToList: false,
     exportChainsAsPresets: false, // false, { device: string, length: number }
 

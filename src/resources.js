@@ -1748,6 +1748,12 @@ export function timeStretch(buffer, factor) {
     const sampleRate = buffer.sampleRate;
     const originalLength = buffer.length;
     const targetLength = Math.max(1, Math.round(originalLength * factor));
+    const grainSize = Math.max(1, Math.min(
+      Math.floor(sampleRate * 0.04),
+      Math.floor(originalLength / 2),
+      Math.floor(targetLength / 2)
+    ));
+    const overlap = Math.max(1, Math.floor(grainSize / 2));
 
     const newBuffer = new AudioBuffer({
         length: targetLength,
@@ -1755,20 +1761,43 @@ export function timeStretch(buffer, factor) {
         sampleRate: sampleRate
     });
 
-    const grainSize = Math.floor(sampleRate * 0.04);
-    const overlap = Math.floor(grainSize / 2);
+    const windowWeights = new Float32Array(targetLength);
+    const windowValues = new Float32Array(grainSize);
+    const grainStarts = [];
+    for (let start = 0; start + grainSize < targetLength; start += overlap) {
+        grainStarts.push(start);
+    }
+    const lastGrainStart = Math.max(0, targetLength - grainSize);
+    if (grainStarts[grainStarts.length - 1] !== lastGrainStart) {
+        grainStarts.push(lastGrainStart);
+    }
+    for (let j = 0; j < grainSize; j++) {
+        windowValues[j] = grainSize === 1 ? 1 :
+          0.5 - 0.5 * Math.cos(2 * Math.PI * (j + 0.5) / grainSize);
+    }
+    for (const outputStart of grainStarts) {
+        for (let j = 0; j < grainSize; j++) {
+            windowWeights[outputStart + j] += windowValues[j];
+        }
+    }
 
     for (let ch = 0; ch < numChannels; ch++) {
         const inputData = buffer.getChannelData(ch);
         const outputData = newBuffer.getChannelData(ch);
+        const sourceRange = originalLength - grainSize;
+        const outputRange = targetLength - grainSize;
 
-        for (let i = 0; i < targetLength - grainSize; i += overlap) {
-            const inputIdx = Math.floor(i / factor);
+        for (const outputStart of grainStarts) {
+            const inputStart = outputRange === 0 ? 0 :
+              Math.round(outputStart * sourceRange / outputRange);
             for (let j = 0; j < grainSize; j++) {
-                const window = 0.5 * (1 - Math.cos(2 * Math.PI * j / (grainSize - 1)));
-                if (inputIdx + j < originalLength && (i + j) < targetLength) {
-                    outputData[i + j] += inputData[inputIdx + j] * window;
-                }
+                const outputIndex = outputStart + j;
+                outputData[outputIndex] += inputData[inputStart + j] * windowValues[j];
+            }
+        }
+        for (let i = 0; i < targetLength; i++) {
+            if (windowWeights[i] > 0) {
+                outputData[i] /= windowWeights[i];
             }
         }
     }
