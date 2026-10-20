@@ -15,7 +15,8 @@ import {
     setLoadingText,
     showToastMessage,
     createDT2PresetBlob,
-    sanitizeDT2Name, indexOfUint8Array
+    sanitizeDT2Name, indexOfUint8Array,
+    pitchShift
 } from './resources.js';
 import {
     drawWaveform,
@@ -1976,6 +1977,12 @@ function showExportSettingsPanel(page = 'settings') {
     </td>
     </tr>
     <tr>
+    <td><span>Pitch-shift spaced-chain samples to a chosen length?&nbsp;&nbsp;&nbsp;</span></td>
+    <td><button title="Pitch-shifts samples in spaced-chain downloads to the chosen length. Defaults to the median length of selected samples; loaded samples are unchanged."
+     onpointerdown="digichain.toggleSetting('pitchShiftSpacedChains')"
+     class="check ${settings.pitchShiftSpacedChains ? 'button' : 'button-outline'}">${settings.pitchShiftSpacedChains ? 'YES' : 'NO'}</button></td>
+    </tr>
+    <tr>
     <td><span>Restore the last used Sample Rate/Bit Depth/Channel? &nbsp;&nbsp;&nbsp;</span></td>
     <td><button onpointerdown="digichain.toggleSetting('restoreLastUsedAudioConfig')" class="check ${settings.restoreLastUsedAudioConfig
               ? 'button'
@@ -2622,19 +2629,62 @@ function generateBlankFile() {
     };
 }
 
-function joinAllUICall(event, pad) {
+async function joinAllUICall(event, pad) {
     if (files.length === 0 || files.filter(f => f.meta.checked).length === 0) { return; }
     if (secondsPerFile !== 0) {
         let _files = files.filter(f => f.meta.duration < secondsPerFile);
         if (_files.length === 0) { return;}
     }
+    let pitchShiftTargetLength;
+    if (pad && settings.pitchShiftSpacedChains) {
+        const lengths = files.filter(f => f.meta.checked).map(f => f.buffer.length).sort((a, b) => a - b);
+        const middle = Math.floor(lengths.length / 2);
+        const medianLength = lengths.length % 2
+          ? lengths[middle]
+          : (lengths[middle - 1] + lengths[middle]) / 2;
+        const defaultSeconds = (medianLength / masterSR).toFixed(6);
+        const targetSeconds = await dcDialog(
+          'prompt',
+          'Enter the target length for spaced-chain samples in seconds (defaults to the selected samples\' median):',
+          {inputType: 'number', defaultValue: defaultSeconds}
+        );
+        if (targetSeconds === false || targetSeconds === '') { return; }
+        const parsedSeconds = Number(targetSeconds);
+        if (!Number.isFinite(parsedSeconds) || parsedSeconds <= 0) {
+            showToastMessage('Please enter a target length greater than zero seconds.');
+            return;
+        }
+        pitchShiftTargetLength = Math.max(1, Math.round(parsedSeconds * masterSR));
+    }
     setLoadingText('Processing');
-    setTimeout(() => joinAll(event, pad), 500);
+    setTimeout(() => joinAll(event, pad, [], 0, false, false, pitchShiftTargetLength), 500);
+}
+
+function pitchShiftFilesToLength(filesToShift, targetLength) {
+    return filesToShift.map(file => {
+        const scale = targetLength / file.buffer.length;
+        const sourceSlices = file.meta.slices || metaFiles.getByFileInDcFormat(file);
+        return {
+            ...file,
+            meta: {
+                ...file.meta,
+                slices: sourceSlices.map(slice => ({
+                    ...slice,
+                    s: Math.round(slice.s * scale),
+                    e: Math.round(slice.e * scale)
+                }))
+            },
+            buffer: pitchShift({
+                buffer: file.buffer,
+                cents: 1200 * Math.log2(file.buffer.length / targetLength)
+            })
+        };
+    });
 }
 
 async function joinAll(
   event, pad = false, filesRemaining = [], fileCount = 0,
-  toInternal = false, zip = false) {
+  toInternal = false, zip = false, pitchShiftTargetLength) {
     if (files.length === 0) { return; }
     if ((toInternal || settings.updateResampleChainsToList ||
       (event.shiftKey || modifierKeys.shiftKey)) && !settings.exportChainsAsPresets) { toInternal = true; }
@@ -2722,8 +2772,13 @@ async function joinAll(
                     }
                 }
             }
-            largest = _files.reduce(
-              (big, cur) => big > cur.buffer.length ? big : cur.buffer.length, 0);
+            if (pad && pitchShiftTargetLength) {
+                _files = pitchShiftFilesToLength(_files, pitchShiftTargetLength);
+                largest = pitchShiftTargetLength;
+            } else {
+                largest = _files.reduce(
+                  (big, cur) => big > cur.buffer.length ? big : cur.buffer.length, 0);
+            }
             totalLength = _files.reduce((total, file) => {
                 total += pad ? largest : file.buffer.length;
                 return total;
@@ -2754,6 +2809,16 @@ async function joinAll(
             totalLength = processing.totalLength;
             filesRemaining = processing.skipped;
             _files = processing.processed;
+            if (pad) {
+                if (pitchShiftTargetLength) {
+                    _files = pitchShiftFilesToLength(_files, pitchShiftTargetLength);
+                    largest = pitchShiftTargetLength;
+                } else {
+                    largest = _files.reduce(
+                      (big, cur) => big > cur.buffer.length ? big : cur.buffer.length, 0);
+                }
+                totalLength = largest * _files.length;
+            }
         }
 
         slices = [];
@@ -2950,7 +3015,7 @@ async function joinAll(
         }
         if (filesRemaining.length > 0) {
             fileCount++;
-            joinAll(event, pad, filesRemaining, fileCount, toInternal, zip);
+            joinAll(event, pad, filesRemaining, fileCount, toInternal, zip, pitchShiftTargetLength);
         } else {
             if (zip) {
                 const zipName = `digichain_${Date.now()}.zip`;

@@ -27,6 +27,7 @@ const defaultSettings = {
     normalizeContrast: false,
     reverseEvenSamplesInChains: false,
     padSpacedChainsWith: 'last', // last, silence, random, repeat
+    pitchShiftSpacedChains: false,
     pitchModifier: 1,
     playWithPopMarker: 0,
     showTouchModifierKeys: false,
