@@ -1836,6 +1836,11 @@ function updateUiButtonAction(param, buttonClass, toggleSetting, forceValue) {
         settings[param] = forceValue === undefined ? !settings[param] : forceValue;
     }
     buttonEl?.classList[settings[param] ? 'remove' : 'add']('fade');
+    if (param === 'updateResampleChainsToList' && buttonEl) {
+        buttonEl.title = settings[param]
+          ? 'ON: Chains are added to the sample list instead of downloaded. Click to disable.'
+          : 'OFF: Chains are downloaded. Click to add generated chains to the sample list.';
+    }
 }
 
 function changePresetBundling(value) {
@@ -2635,8 +2640,10 @@ async function joinAllUICall(event, pad) {
         let _files = files.filter(f => f.meta.duration < secondsPerFile);
         if (_files.length === 0) { return;}
     }
+    const toInternal = !settings.exportChainsAsPresets &&
+      (settings.updateResampleChainsToList || event.shiftKey || modifierKeys.shiftKey);
     let pitchShiftTargetLength;
-    if (pad && settings.pitchShiftSpacedChains) {
+    if (pad && settings.pitchShiftSpacedChains === true) {
         const lengths = files.filter(f => f.meta.checked).map(f => f.buffer.length).sort((a, b) => a - b);
         const middle = Math.floor(lengths.length / 2);
         const medianLength = lengths.length % 2
@@ -2646,9 +2653,9 @@ async function joinAllUICall(event, pad) {
         const targetSeconds = await dcDialog(
           'prompt',
           'Enter the target length for spaced-chain samples in seconds (defaults to the selected samples\' median):',
-          {inputType: 'number', defaultValue: defaultSeconds}
+          {inputType: 'number', defaultValue: defaultSeconds, cancelValue: null}
         );
-        if (targetSeconds === false || targetSeconds === '') { return; }
+        if (targetSeconds === null || targetSeconds === false || targetSeconds === '') { return; }
         const parsedSeconds = Number(targetSeconds);
         if (!Number.isFinite(parsedSeconds) || parsedSeconds <= 0) {
             showToastMessage('Please enter a target length greater than zero seconds.');
@@ -2657,7 +2664,7 @@ async function joinAllUICall(event, pad) {
         pitchShiftTargetLength = Math.max(1, Math.round(parsedSeconds * masterSR));
     }
     setLoadingText('Processing');
-    setTimeout(() => joinAll(event, pad, [], 0, false, false, pitchShiftTargetLength), 500);
+    setTimeout(() => joinAll(event, pad, [], 0, toInternal, false, pitchShiftTargetLength), 500);
 }
 
 function pitchShiftFilesToLength(filesToShift, targetLength) {
@@ -2686,8 +2693,6 @@ async function joinAll(
   event, pad = false, filesRemaining = [], fileCount = 0,
   toInternal = false, zip = false, pitchShiftTargetLength) {
     if (files.length === 0) { return; }
-    if ((toInternal || settings.updateResampleChainsToList ||
-      (event.shiftKey || modifierKeys.shiftKey)) && !settings.exportChainsAsPresets) { toInternal = true; }
     try {
         const joinedEl = document.getElementById('getJoined');
 
@@ -2772,7 +2777,7 @@ async function joinAll(
                     }
                 }
             }
-            if (pad && pitchShiftTargetLength) {
+            if (pad && settings.pitchShiftSpacedChains === true && pitchShiftTargetLength) {
                 _files = pitchShiftFilesToLength(_files, pitchShiftTargetLength);
                 largest = pitchShiftTargetLength;
             } else {
@@ -2810,7 +2815,7 @@ async function joinAll(
             filesRemaining = processing.skipped;
             _files = processing.processed;
             if (pad) {
-                if (pitchShiftTargetLength) {
+                if (settings.pitchShiftSpacedChains === true && pitchShiftTargetLength) {
                     _files = pitchShiftFilesToLength(_files, pitchShiftTargetLength);
                     largest = pitchShiftTargetLength;
                 } else {
@@ -2862,8 +2867,8 @@ async function joinAll(
           getNextChainFileName(_files.length) :
           (
             settings.useDateNumberInPlaceOfFileName ?
-              `${path}dc-${pad ? 'sp-' : ''}${Date.now()}-${fileCountText}--${_files.length}` :
-              `${path}dc-${pad ? 'sp-' : ''}${getNiceFileName('', _files[0], true)}-${fileCountText}--${_files.length}`
+              `${path}dc-${pad ? (settings.pitchShiftSpacedChains === true && pitchShiftTargetLength ? 'sc-ps-' : 'sp-') : ''}${Date.now()}-${fileCountText}--${_files.length}` :
+              `${path}dc-${pad ? (settings.pitchShiftSpacedChains === true && pitchShiftTargetLength ? 'sc-ps-' : 'sp-') : ''}${getNiceFileName('', _files[0], true)}-${fileCountText}--${_files.length}`
           );
 
         if (settings.exportChainsAsPresets && settings.exportChainsAsPresets.device !== 'dt') {
@@ -5996,6 +6001,7 @@ const dropHandler = async (event) => {
 };
 
 function init() {
+    updateBuildTimestamp();
     const pageSizeSelect = document.getElementById('pageSizeSelect');
     if (pageSizeSelect) {
         pageSizeSelect.value = pageSize;
@@ -6468,6 +6474,48 @@ function init() {
     document.getElementById('modifierKeyctrlKey').textContent = navigator.userAgent.indexOf('Mac') !== -1
       ? 'CMD'
       : 'CTRL';
+}
+
+async function updateBuildTimestamp() {
+    const timestampEl = document.getElementById('buildTimestamp');
+    const moduleScript = document.querySelector('script[type="module"][src]');
+    if (!timestampEl) { return; }
+    timestampEl.textContent = 'Build: checking…';
+
+    if (moduleScript) {
+        try {
+            const indexUrl = new URL(location.href);
+            indexUrl.search = '';
+            indexUrl.hash = '';
+            const assetUrls = [
+                indexUrl,
+                moduleScript.src,
+                ...['resources.js', 'editor.js', 'settings.js', 'digitakt.js'].map(
+                  file => new URL(file, moduleScript.src)),
+                new URL('main.css', document.baseURI)
+            ];
+            const results = await Promise.allSettled(assetUrls.map(async url => {
+                const response = await fetch(url, {method: 'HEAD', cache: 'no-store'});
+                const lastModified = response.headers.get('Last-Modified');
+                return response.ok && lastModified ? new Date(lastModified) : null;
+            }));
+            const buildDates = results
+              .filter(result => result.status === 'fulfilled')
+              .map(result => result.value)
+              .filter(date => date instanceof Date && !Number.isNaN(date.getTime()));
+            if (buildDates.length) {
+                const buildDate = new Date(Math.max(...buildDates.map(date => date.getTime())));
+                timestampEl.textContent = `Build: ${buildDate.toLocaleString()}`;
+                timestampEl.title = 'Timestamp of the newest app file served by the web server.';
+                return;
+            }
+        } catch (error) {
+            console.warn('Could not read the app build timestamp.', error);
+        }
+    }
+
+    timestampEl.textContent = 'Build: unavailable';
+    timestampEl.title = 'The server did not provide build timestamps.';
 }
 
 async function clearIndexedDb() {

@@ -523,6 +523,16 @@ export async function dcDialog(type = 'message', messageString = '', config = {}
     if (type === 'prompt' || type === 'confirm' || type === 'alert' || type === 'custom') {
         return await new Promise(resolve => {
             const dcDialogEl = document.querySelector('#dcDialog');
+            let resolved = false;
+            const resolveOnce = value => {
+                if (resolved) { return; }
+                resolved = true;
+                resolve(value);
+            };
+            const cancelValue = Object.hasOwn(config, 'cancelValue')
+              ? config.cancelValue
+              : config.defaultValue ?? false;
+            dcDialogEl.addEventListener('close', () => resolveOnce(cancelValue), {once: true});
             let promptInputEl = document.querySelector('#dcDialog .content .prompt-input');
             let promptCancelEl = document.querySelector('#dcDialog .content .prompt-cancel');
             let promptCenterEl = document.querySelector('#dcDialog .content .prompt-center');
@@ -535,7 +545,7 @@ export async function dcDialog(type = 'message', messageString = '', config = {}
                     </div>
                 `;
                 if (config.onRender) {
-                    config.onRender(dcDialogEl, resolve);
+                    config.onRender(dcDialogEl, resolveOnce);
                 }
             } else {
                 dcDialogEl.innerHTML = `
@@ -572,20 +582,20 @@ export async function dcDialog(type = 'message', messageString = '', config = {}
 
                 if (promptCancelEl) {
                     promptCancelEl.onclick = () => {
-                        resolve(config.defaultValue ?? false);
+                        resolveOnce(cancelValue);
                         dcDialogEl.close();
                     };
                 }
                 if (promptOkEl) {
                     promptOkEl.onclick = () => {
-                        resolve(type === 'prompt' ? (promptInputEl.value || '') : true);
+                        resolveOnce(type === 'prompt' ? (promptInputEl.value || '') : true);
                         dcDialogEl.close();
                     };
                 }
 
                 if (promptCenterEl) {
                     promptCenterEl.onclick = () => {
-                        resolve(type === 'prompt' ? (promptInputEl.value || '') : 'center');
+                        resolveOnce(type === 'prompt' ? (promptInputEl.value || '') : 'center');
                         dcDialogEl.close();
                     };
                 }
