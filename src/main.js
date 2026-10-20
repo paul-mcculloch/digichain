@@ -52,6 +52,8 @@ let targetContainer = 'w';
 let embedSliceData = false;
 let secondsPerFile = 0;
 let audioCtx;
+let chainPreviewSource;
+let activeChainPreview;
 let files = [];
 let currentPage = 1;
 let pageSize = (() => {
@@ -1807,25 +1809,95 @@ function toggleSecondsPerFile(event, value) {
             shiftKey: false,
             target: document.querySelector('.slice-grid-off')
         }, 0);
-        if (settings.spacedChainMode) {
-            updateSpacedChainMode(true);
+        if (settings.chainMode !== 'normal') {
+            updateChainMode('normal');
         }
     }
 
     setCountValues();
 }
 
-function updateSpacedChainMode(toggleSetting) {
+function medianSelectedSampleLengthSeconds() {
+    const lengths = files.filter(file => file.meta.checked)
+      .map(file => file.buffer.length)
+      .sort((a, b) => a - b);
+    if (lengths.length === 0) { return 0.001; }
+    const middle = Math.floor(lengths.length / 2);
+    const medianLength = lengths.length % 2
+      ? lengths[middle]
+      : (lengths[middle - 1] + lengths[middle]) / 2;
+    return Math.max(0.001, Number((medianLength / masterSR).toFixed(3)));
+}
+
+function updatePitchedChainLength(value) {
+    const lengthSeconds = Number(value);
+    if (!Number.isFinite(lengthSeconds) || lengthSeconds <= 0) {
+        showToastMessage('Please enter a target length greater than zero seconds.');
+        const input = document.getElementById('pitchedChainLength');
+        input.value = Number(settings.pitchedChainLengthSeconds).toFixed(3);
+        return;
+    }
+    settings.pitchedChainLengthSeconds = Number(lengthSeconds.toFixed(3));
+    document.getElementById('pitchedChainLength').value =
+      settings.pitchedChainLengthSeconds.toFixed(3);
+}
+
+function toggleChainModeMenu() {
+    const menu = document.querySelector('.chain-mode-options');
+    const trigger = document.querySelector('.chain-mode-trigger');
+    menu.hidden = !menu.hidden;
+    trigger.setAttribute('aria-expanded', `${!menu.hidden}`);
+}
+
+function updateChainMode(mode, resetPitchedLength = true) {
+    if (!['normal', 'spaced', 'pitched'].includes(mode)) { return; }
+    settings.chainMode = mode;
+    const modeIcons = {
+        normal: 'gg-stack',
+        spaced: 'gg-carousel',
+        pitched: 'gg-arrows-v'
+    };
+    const currentIcon = document.querySelector('.chain-mode-current-icon');
+    currentIcon.className = `chain-mode-current-icon ${modeIcons[mode]}`;
+    const menu = document.querySelector('.chain-mode-options');
+    menu.hidden = true;
+    document.querySelector('.chain-mode-trigger').setAttribute('aria-expanded', 'false');
+    document.querySelectorAll('.chain-mode-option').forEach(button => {
+        const selected = button.dataset.mode === mode;
+        button.classList.toggle('button', selected);
+        button.classList.toggle('button-outline', !selected);
+        button.setAttribute('aria-pressed', `${selected}`);
+        button.setAttribute('aria-checked', `${selected}`);
+    });
+    const lengthInput = document.getElementById('pitchedChainLength');
+    if (lengthInput) {
+        lengthInput.disabled = mode !== 'pitched';
+        const savedLength = Number(settings.pitchedChainLengthSeconds);
+        if (mode === 'pitched' &&
+          (resetPitchedLength || localStorage.getItem('pitchedChainLengthSeconds') === null ||
+            !Number.isFinite(savedLength) || savedLength <= 0)) {
+            settings.pitchedChainLengthSeconds = medianSelectedSampleLengthSeconds();
+        } else if (!Number.isFinite(savedLength) || savedLength <= 0) {
+            settings.pitchedChainLengthSeconds = medianSelectedSampleLengthSeconds();
+        }
+        lengthInput.value = Number(settings.pitchedChainLengthSeconds).toFixed(3);
+    }
     const spacedEl = document.querySelector('button.dl-spaced');
     const chainEl = document.querySelector('button.dl-chain');
-    const spacedToggleEl = document.querySelector('.toggle-spaced-chain-mode');
-    if (toggleSetting) {
-        settings.spacedChainMode = !settings.spacedChainMode;
+    spacedEl.style.display = mode === 'normal' ? 'none' : 'block';
+    chainEl.style.display = mode === 'normal' ? 'block' : 'none';
+    const spacedLabel = spacedEl.querySelector('.join-count');
+    if (spacedLabel) {
+        const count = spacedLabel.dataset.joinCount || '0';
+        const countText = count === '0' ? '-' : count;
+        const chainWord = count === '1' ? 'Chain' : 'Chains';
+        spacedLabel.textContent =
+          ` ${countText} ${mode === 'pitched' ? 'Pitched' : 'Spaced'} ${chainWord}`;
     }
-    spacedToggleEl.classList[settings.spacedChainMode ? 'remove' : 'add']('fade');
-    spacedEl.style.display = settings.spacedChainMode ? 'block' : 'none';
-    chainEl.style.display = settings.spacedChainMode ? 'none' : 'block';
-    if (settings.spacedChainMode && settings.exportChainsAsPresets) {
+    spacedEl.title = mode === 'pitched'
+      ? 'Download selected chains with samples pitch-shifted to the target length. Shift-click adds the result to the sample list.'
+      : 'Download the selected samples joined, spaced evenly. Shift-click adds the result to the sample list.';
+    if (resetPitchedLength && mode !== 'normal' && settings.exportChainsAsPresets) {
         changePresetBundling(false);
     }
 }
@@ -1837,9 +1909,16 @@ function updateUiButtonAction(param, buttonClass, toggleSetting, forceValue) {
     }
     buttonEl?.classList[settings[param] ? 'remove' : 'add']('fade');
     if (param === 'updateResampleChainsToList' && buttonEl) {
-        buttonEl.title = settings[param]
-          ? 'ON: Chains are added to the sample list instead of downloaded. Click to disable.'
-          : 'OFF: Chains are downloaded. Click to add generated chains to the sample list.';
+        const chainAction = settings[param]
+          ? 'Normal click adds chains to the sample list; Shift-click previews them.'
+          : 'Normal click downloads chains; Shift-click adds them to the sample list.';
+        buttonEl.title = `${settings[param] ? 'ON' : 'OFF'}: ${chainAction} Click to toggle.`;
+        document.querySelectorAll('.dl-chain, .dl-spaced').forEach(button => {
+            const chainType = button.classList.contains('dl-spaced') ? 'spaced chains' : 'chains';
+            button.title = settings[param]
+              ? `Add selected ${chainType} to the sample list. Shift-click to preview.`
+              : `Download selected ${chainType}. Shift-click to add to the sample list.`;
+        });
     }
 }
 
@@ -1857,9 +1936,8 @@ function changePresetBundling(value) {
         value = 'sl';
     }
     if (presetConfig) {
-        if (settings.spacedChainMode) {
-            settings.spacedChainMode = false;
-            updateSpacedChainMode(false);
+        if (settings.chainMode !== 'normal') {
+            updateChainMode('normal', false);
         }
         settings.updateResampleChainsToList = false;
         updateUiButtonAction('updateResampleChainsToList', '.toggle-top-list', false);
@@ -1872,8 +1950,7 @@ function changePresetBundling(value) {
         selectEl.setAttribute('value', value ?? 'sl');
     }
     if (_value.startsWith('dt')) {
-        settings.spacedChainMode = true;
-        updateSpacedChainMode(false);
+        updateChainMode('spaced', false);
         toggleSecondsPerFile({}, 0);
     }
     setTimeout(() => setCountValues(), 250);
@@ -1980,12 +2057,6 @@ function showExportSettingsPanel(page = 'settings') {
     <button title="Pads spaced chains with a reversed repeat of the sample within the chain at the offset position from the start." onpointerdown="digichain.toggleSetting('padSpacedChainsWith', 'repeat')" class="check ${settings.padSpacedChainsWith ===
             'repeat' ? 'button' : 'button-outline'}">Rcsr</button>
     </td>
-    </tr>
-    <tr>
-    <td><span>Pitch-shift spaced-chain samples to a chosen length?&nbsp;&nbsp;&nbsp;</span></td>
-    <td><button title="Pitch-shifts samples in spaced-chain downloads to the chosen length. Defaults to the median length of selected samples; loaded samples are unchanged."
-     onpointerdown="digichain.toggleSetting('pitchShiftSpacedChains')"
-     class="check ${settings.pitchShiftSpacedChains ? 'button' : 'button-outline'}">${settings.pitchShiftSpacedChains ? 'YES' : 'NO'}</button></td>
     </tr>
     <tr>
     <td><span>Restore the last used Sample Rate/Bit Depth/Channel? &nbsp;&nbsp;&nbsp;</span></td>
@@ -2640,31 +2711,31 @@ async function joinAllUICall(event, pad) {
         let _files = files.filter(f => f.meta.duration < secondsPerFile);
         if (_files.length === 0) { return;}
     }
-    const toInternal = !settings.exportChainsAsPresets &&
-      (settings.updateResampleChainsToList || event.shiftKey || modifierKeys.shiftKey);
+    const shiftPressed = event.shiftKey || modifierKeys.shiftKey;
+    const preview = !settings.exportChainsAsPresets &&
+      settings.updateResampleChainsToList && shiftPressed;
+    const toInternal = !settings.exportChainsAsPresets && !preview &&
+      (settings.updateResampleChainsToList || shiftPressed);
     let pitchShiftTargetLength;
-    if (pad && settings.pitchShiftSpacedChains === true) {
-        const lengths = files.filter(f => f.meta.checked).map(f => f.buffer.length).sort((a, b) => a - b);
-        const middle = Math.floor(lengths.length / 2);
-        const medianLength = lengths.length % 2
-          ? lengths[middle]
-          : (lengths[middle - 1] + lengths[middle]) / 2;
-        const defaultSeconds = (medianLength / masterSR).toFixed(6);
-        const targetSeconds = await dcDialog(
-          'prompt',
-          'Enter the target length for spaced-chain samples in seconds (defaults to the selected samples\' median):',
-          {inputType: 'number', defaultValue: defaultSeconds, cancelValue: null}
-        );
-        if (targetSeconds === null || targetSeconds === false || targetSeconds === '') { return; }
-        const parsedSeconds = Number(targetSeconds);
-        if (!Number.isFinite(parsedSeconds) || parsedSeconds <= 0) {
+    if (pad && settings.chainMode === 'pitched') {
+        const lengthSeconds = Number(document.getElementById('pitchedChainLength').value);
+        if (!Number.isFinite(lengthSeconds) || lengthSeconds <= 0) {
             showToastMessage('Please enter a target length greater than zero seconds.');
             return;
         }
-        pitchShiftTargetLength = Math.max(1, Math.round(parsedSeconds * masterSR));
+        pitchShiftTargetLength = Math.max(1, Math.round(lengthSeconds * masterSR));
     }
-    setLoadingText('Processing');
-    setTimeout(() => joinAll(event, pad, [], 0, toInternal, false, pitchShiftTargetLength), 500);
+    if (preview) {
+        cancelChainPreview();
+        activeChainPreview = {cancelled: false};
+    }
+    const previewSession = preview ? activeChainPreview : null;
+    setLoadingText(preview ? 'Previewing chain (Esc to cancel)' : 'Processing');
+    setTimeout(
+      () => joinAll(
+        event, pad, [], 0, toInternal, false, pitchShiftTargetLength, preview, previewSession),
+      500
+    );
 }
 
 function pitchShiftFilesToLength(filesToShift, targetLength) {
@@ -2691,8 +2762,15 @@ function pitchShiftFilesToLength(filesToShift, targetLength) {
 
 async function joinAll(
   event, pad = false, filesRemaining = [], fileCount = 0,
-  toInternal = false, zip = false, pitchShiftTargetLength) {
-    if (files.length === 0) { return; }
+  toInternal = false, zip = false, pitchShiftTargetLength, preview = false, previewSession = null) {
+    if (previewSession?.cancelled) {
+        finishChainPreview(previewSession);
+        return;
+    }
+    if (files.length === 0) {
+        finishChainPreview(previewSession);
+        return;
+    }
     try {
         const joinedEl = document.getElementById('getJoined');
 
@@ -2745,7 +2823,7 @@ async function joinAll(
         const isDT = settings.exportChainsAsPresets?.device === 'dt';
         const needsZip = isDT ? (sliceGridT > 0 && totalChecked > sliceGridT) : (totalChecked > 1);
 
-        if (
+        if (!preview &&
           (((settings.zipDownloads || window.__TAURI__) && !toInternal) || settings.exportChainsAsPresets) &&
           needsZip
         ) {
@@ -2777,7 +2855,7 @@ async function joinAll(
                     }
                 }
             }
-            if (pad && settings.pitchShiftSpacedChains === true && pitchShiftTargetLength) {
+            if (pad && settings.chainMode === 'pitched' && pitchShiftTargetLength) {
                 _files = pitchShiftFilesToLength(_files, pitchShiftTargetLength);
                 largest = pitchShiftTargetLength;
             } else {
@@ -2815,7 +2893,7 @@ async function joinAll(
             filesRemaining = processing.skipped;
             _files = processing.processed;
             if (pad) {
-                if (settings.pitchShiftSpacedChains === true && pitchShiftTargetLength) {
+                if (settings.chainMode === 'pitched' && pitchShiftTargetLength) {
                     _files = pitchShiftFilesToLength(_files, pitchShiftTargetLength);
                     largest = pitchShiftTargetLength;
                 } else {
@@ -2867,8 +2945,8 @@ async function joinAll(
           getNextChainFileName(_files.length) :
           (
             settings.useDateNumberInPlaceOfFileName ?
-              `${path}dc-${pad ? (settings.pitchShiftSpacedChains === true && pitchShiftTargetLength ? 'sc-ps-' : 'sp-') : ''}${Date.now()}-${fileCountText}--${_files.length}` :
-              `${path}dc-${pad ? (settings.pitchShiftSpacedChains === true && pitchShiftTargetLength ? 'sc-ps-' : 'sp-') : ''}${getNiceFileName('', _files[0], true)}-${fileCountText}--${_files.length}`
+              `${path}dc-${pad ? (settings.chainMode === 'pitched' && pitchShiftTargetLength ? 'sc-ps-' : 'sp-') : ''}${Date.now()}-${fileCountText}--${_files.length}` :
+              `${path}dc-${pad ? (settings.chainMode === 'pitched' && pitchShiftTargetLength ? 'sc-ps-' : 'sp-') : ''}${getNiceFileName('', _files[0], true)}-${fileCountText}--${_files.length}`
           );
 
         if (settings.exportChainsAsPresets && settings.exportChainsAsPresets.device !== 'dt') {
@@ -2952,7 +3030,9 @@ async function joinAll(
                     name: `${_fileName}.wav`
                 }, buffer: audioArrayBuffer, meta: {slices}
             };
-            if (toInternal) {
+            if (preview) {
+                await previewChain(audioArrayBuffer, previewSession);
+            } else if (toInternal) {
 
                 const wav = await setWavLink(fileData, joinedEl, false, false,
                   (masterBitDepth === 8 ? 8 : 32));
@@ -3019,8 +3099,14 @@ async function joinAll(
             }
         }
         if (filesRemaining.length > 0) {
+            if (previewSession?.cancelled) {
+                finishChainPreview(previewSession);
+                return;
+            }
             fileCount++;
-            joinAll(event, pad, filesRemaining, fileCount, toInternal, zip, pitchShiftTargetLength);
+            await joinAll(
+              event, pad, filesRemaining, fileCount, toInternal, zip, pitchShiftTargetLength,
+              preview, previewSession);
         } else {
             if (zip) {
                 const zipName = `digichain_${Date.now()}.zip`;
@@ -3043,9 +3129,15 @@ async function joinAll(
                     });
                 }
             }
+            if (preview) {
+                finishChainPreview(previewSession);
+            }
             renderList();
         }
     } catch (joinError) {
+        if (preview) {
+            finishChainPreview(previewSession);
+        }
         let errorMessage = `An unexpected error was encountered while building the sample chain(s).`;
         debugger;
         if (joinError) {
@@ -3055,6 +3147,49 @@ async function joinAll(
         showToastMessage(errorMessage, 15000);
         console.log(joinError);
     }
+}
+
+function cancelChainPreview() {
+    if (!activeChainPreview) { return false; }
+    const previewSession = activeChainPreview;
+    previewSession.cancelled = true;
+    activeChainPreview = null;
+    if (chainPreviewSource) {
+        const source = chainPreviewSource;
+        chainPreviewSource = null;
+        source.stop();
+    }
+    setLoadingText('');
+    return true;
+}
+
+function finishChainPreview(previewSession) {
+    if (activeChainPreview !== previewSession) { return; }
+    activeChainPreview = null;
+    setLoadingText('');
+}
+
+async function previewChain(buffer, previewSession) {
+    await checkAndSetAudioContext();
+    if (previewSession.cancelled) { return; }
+
+    const source = audioCtx.createBufferSource();
+    chainPreviewSource = source;
+    source.buffer = buffer;
+    source.connect(audioCtx.destination);
+    if (digichainAudioDestination) {
+        source.connect(digichainAudioDestination);
+    }
+
+    await new Promise(resolve => {
+        source.onended = () => {
+            if (chainPreviewSource === source) {
+                chainPreviewSource = null;
+            }
+            resolve();
+        };
+        source.start();
+    });
 }
 
 function convertChain(event, toSpacedChain = false) {
@@ -4231,7 +4366,7 @@ function setCountValues() {
               el.textContent = ` ${
                 joinCount === 0
                   ? '-'
-                  : joinCount}${idx === 0 ? ' Spaced' : ''}${joinCount === 1
+                : joinCount}${idx === 0 ? (settings.chainMode === 'pitched' ? ' Pitched' : ' Spaced') : ''}${joinCount === 1
                 ? chainText
                 : chainText + 's'}`;
               el.dataset.joinCount = `${joinCount}`;
@@ -6206,6 +6341,7 @@ function init() {
             document.body.classList.add('ctrlKey-down');
         }
         if (event.code === 'Escape') {
+            cancelChainPreview();
             if (files.length && !(event.shiftKey || modifierKeys.shiftKey)) {
                 files.filter(f => f.meta.playing && f.meta.id).
                   forEach(f => stopPlayFile(false, f.meta.id));
@@ -6466,7 +6602,11 @@ function init() {
             masterBitDepth
         });
     }
-    updateSpacedChainMode();
+    if (localStorage.getItem('chainMode') === null &&
+      localStorage.getItem('spacedChainMode') !== null) {
+        settings.chainMode = settings.spacedChainMode ? 'spaced' : 'normal';
+    }
+    updateChainMode(settings.chainMode, false);
     updateUiButtonAction('updateResampleChainsToList', '.toggle-top-list');
     changePresetBundling(settings.exportChainsAsPresets?.device);
     setTimeout(() => toggleOptionsPanel(), 250);
@@ -7076,7 +7216,9 @@ window.digichain = {
     pitchExports,
     toggleSetting,
     toggleSecondsPerFile,
-    updateSpacedChainMode,
+    updateChainMode,
+    toggleChainModeMenu,
+    updatePitchedChainLength,
     updateUiButtonAction,
     changePresetBundling,
     changeOpParam,

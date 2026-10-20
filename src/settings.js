@@ -1,6 +1,11 @@
 const settingsStore = {};
 
-const isStringValue = ['lastUsedAudioConfig', 'defaultAudioConfigText', 'padSpacedChainsWith'];
+const isStringValue = [
+    'lastUsedAudioConfig',
+    'defaultAudioConfigText',
+    'padSpacedChainsWith',
+    'chainMode'
+];
 
 const defaultSettings = {
     lastUsedAudioConfig: '48000m16w',
@@ -8,7 +13,8 @@ const defaultSettings = {
     restoreLastUsedAudioConfig: true,
     retainSessionState: true,
 
-    spacedChainMode: true,
+    chainMode: 'spaced',
+    pitchedChainLengthSeconds: 0.001,
     updateResampleChainsToList: false,
     exportChainsAsPresets: false, // false, { device: string, length: number }
 
@@ -27,7 +33,6 @@ const defaultSettings = {
     normalizeContrast: false,
     reverseEvenSamplesInChains: false,
     padSpacedChainsWith: 'last', // last, silence, random, repeat
-    pitchShiftSpacedChains: false,
     pitchModifier: 1,
     playWithPopMarker: 0,
     showTouchModifierKeys: false,

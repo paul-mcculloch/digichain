@@ -2595,7 +2595,8 @@ dialog .content {
     opacity: 0.55;
 }
 .download-buttons {
-    width: 35rem;
+    width: 100%;
+    box-sizing: border-box;
 }
 .btn-download {
     padding: 0;
@@ -2612,19 +2613,98 @@ dialog .content {
 
 .chain-actions {
     display: flex;
+    flex-wrap: wrap;
     flex-direction: row;
     justify-content: left;
+    width: 100%;
 }
 .chain-action-icons {
     display: flex;
+    flex-wrap: wrap;
     flex-direction: row;
-    justify-content: space-around;
-    padding-left: 1rem;
-    width: 17rem;
+    align-items: center;
+    justify-content: flex-start;
+    flex: 0 1 auto;
+    gap: 0.4rem;
+    padding-left: 0;
+    min-width: 0;
 }
-.chain-action-icons button {
+.chain-secondary-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: 0;
+}
+.chain-secondary-controls > .toggle-top-list {
     padding: 0;
     display: none;
+}
+
+.chain-mode-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 0.4rem;
+}
+.chain-mode-menu {
+    position: relative;
+}
+.chain-mode-menu .chain-mode-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 3.8rem;
+    height: 3.8rem;
+    line-height: 1;
+    padding: 0;
+}
+.chain-mode-options {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 0.3rem);
+    left: 0;
+    display: flex;
+    gap: 0.3rem;
+    padding: 0.4rem;
+    border: 0.1rem solid #d79c4e;
+    border-radius: .4rem;
+    background: #202124;
+    box-shadow: 0 .4rem 1.2rem #0008;
+}
+.chain-mode-options[hidden] {
+    display: none;
+}
+body.light .chain-mode-options {
+    background: #fff;
+}
+.chain-mode-options .chain-mode-option {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 3.8rem;
+    height: 3.8rem;
+    padding: 0;
+}
+.chain-mode-option i:not(.gg-carousel) {
+    display: inline-block;
+    flex: 0 0 auto;
+    margin: 0;
+    transform: scale(.8);
+}
+.chain-mode-option i.gg-carousel {
+    display: inline-block;
+    flex: 0 0 auto;
+    margin: 0;
+    transform: scale(.8) rotate(270deg);
+}
+.chain-mode-controls input {
+    width: 7rem;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    text-align: center;
+}
+.chain-length-unit {
+    margin-left: -0.3rem;
 }
 
 #presetBundlingSelect {
@@ -2638,8 +2718,8 @@ dialog .content {
 #presetBundlingSelect[value=SL] {
     width: 5.75rem;
 }
-.chain-action-icons:has(#presetBundlingSelect[value=sl]) button,
-.chain-action-icons:has(#presetBundlingSelect[value=SL]) button,
+.chain-action-icons:has(#presetBundlingSelect[value=sl]) > .chain-secondary-controls > .toggle-top-list,
+.chain-action-icons:has(#presetBundlingSelect[value=SL]) > .chain-secondary-controls > .toggle-top-list,
 .right-buttons:has(#presetBundlingSelect[value=sl]) .toggle-seconds-per-file,
 .right-buttons:has(#presetBundlingSelect[value=SL]) .toggle-seconds-per-file {
     display: block;
@@ -3050,8 +3130,10 @@ button:has(.join-count[data-join-count="0"]) {
     border-radius: 5px;
     text-align: center;
     padding-bottom: 0.25rem;
-    width: 35rem;
-    height: 10.75rem;
+    width: 100%;
+    box-sizing: border-box;
+    height: auto;
+    min-height: 10.75rem;
     background-color: #202124;
     transition: transform .2s ease-in;
 }
@@ -3124,6 +3206,7 @@ button.sel-transient:is(.button-outline) ~ #transientThreshold {
 }
 .right-buttons {
     transition: opacity .33s ease-in;
+    min-width: 0;
 }
 .right-buttons:has(.toggle-seconds-per-file.on) button.check:not(.slice-grid-off),
 .right-buttons:has(.toggle-seconds-per-file.on) button.dl-spaced,
@@ -3702,14 +3785,18 @@ body.grid-view .path-exceeds-127 {
 
 @media (max-width: 40.0rem) {
     .container { margin-top: 2.5rem; }
-    .min-width-20, .column-33, .column-33 .download-buttons, .column-33 .slice-group { width: 99%; }
+    .min-width-20, .column-33, .column-40, .column-50, .column-60,
+    .column-33 .download-buttons, .column-33 .slice-group { width: 99%; }
+    .row .column.column-40, .row .column.column-60 {
+        flex: 0 0 100%;
+        max-width: 100%;
+    }
     .column-33 .btn-download-all { width: 49.3%;}
     .column-33 .check { width: 13.1%; }
     .left-buttons .row { display: block; }
     .left-buttons .button { width: 48.5%; margin-right: 0.1rem; }
     .left-buttons .row .button:first-child { margin-left: 0.25rem;}
     .dl-chain, .dl-spaced { width: 56%;}
-    .chain-action-icons { width: 43%;}
     .info-panel-md, .split-panel-options {
         width: 90%;
         left: 4.5%;

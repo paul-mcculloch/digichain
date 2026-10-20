@@ -318,7 +318,7 @@
 </div>
 <div class="container">
     <div id="allOptionsPanel" class="row all-options hidden">
-        <div class="column left-buttons">
+        <div class="column column-60 left-buttons">
 
             <div class="row">
                 <label class="button button-clear load-file-label" for="uploadInput" aria="Load files..."
@@ -500,9 +500,7 @@
                 </button>
             </div>
         </div>
-        <div class="column">
-        </div>
-        <div class="column-33 right-buttons">
+        <div class="column column-40 right-buttons">
             <div class="download-buttons">
                 <button title="Download all the selected samples converted to the current audio context as a zip file (with folder structure retained). Shift+click to get the files in a zip with their folders flattened into the file names."
                         class="btn-download btn-download-all has-shift-mod" onclick="digichain.downloadAll(event)"><i
@@ -567,19 +565,55 @@
                             class="gg-software-download"></i><span class="join-count join-count-chain" data-join-count="0"> - Chains</span>
                     </button>
                     <div class="chain-action-icons">
-                        <button title="Toggle between creating Chains, where sample lengths remain the same, and Spaced Chains, where all samples are padded with silence to match the length of the longest sample per chain."
-                                class="button-clear toggle-spaced-chain-mode fade" onclick="digichain.updateSpacedChainMode(true)"><i class="gg-carousel"></i>
-                        </button>
-                        <button title="When enabled, created chains will be added to the top of the sample list instead of producing a zip file to download (the same as holding the Shift key will pressing the Chain button)."
-                                class="button-clear toggle-top-list fade" onclick="digichain.updateUiButtonAction('updateResampleChainsToList', '.toggle-top-list', true)"><i class="gg-top-list"></i>
-                        </button>
-                        <select id="presetBundlingSelect" title="Preset bundling options. SL: Slice Markers (Default), TV: Tonverk, XY: OP-XY, DT: Digitakt 2."
-                                onchange="digichain.changePresetBundling(this.value)">
-                            <option value="sl" title="Slice Markers (Default)">SL</option>
-                            <option value="tv" title="Tonverk Preset bundling (up to 84 slices, elmulti)">TV</option>
-                            <option value="xy" title="OP-XY Preset bundling (up to 24 slices, truncated to 20s)">XY</option>
-<!--                            <option value="dt" title="Digitakt 2 Preset bundling (up to 64 slices, dtpreset)">DT</option>-->
-                        </select>
+                        <div class="chain-mode-controls">
+                            <div class="chain-mode-menu">
+                                <button type="button" class="button-outline chain-mode-trigger"
+                                        title="Choose chain mode." aria-label="Choose chain mode"
+                                        aria-haspopup="menu" aria-expanded="false"
+                                        onclick="digichain.toggleChainModeMenu()">
+                                    <i class="gg-stack chain-mode-current-icon" aria-hidden="true"></i>
+                                </button>
+                                <div class="chain-mode-options" role="menu" hidden>
+                                    <button type="button" class="button-outline chain-mode-option"
+                                            data-mode="normal" title="Normal: join samples without padding or pitch shifting."
+                                            aria-label="Normal chain mode" aria-pressed="false"
+                                            role="menuitemradio"
+                                            onclick="digichain.updateChainMode('normal')">
+                                        <i class="gg-stack" aria-hidden="true"></i>
+                                    </button>
+                                    <button type="button" class="button-outline chain-mode-option"
+                                            data-mode="spaced" title="Spaced: pad samples with silence to match the longest sample."
+                                            aria-label="Spaced chain mode" aria-pressed="false"
+                                            role="menuitemradio"
+                                            onclick="digichain.updateChainMode('spaced')">
+                                        <i class="gg-carousel" aria-hidden="true"></i>
+                                    </button>
+                                    <button type="button" class="button-outline chain-mode-option"
+                                            data-mode="pitched" title="Pitched: pitch-shift samples to the target length."
+                                            aria-label="Pitched chain mode" aria-pressed="false"
+                                            role="menuitemradio"
+                                            onclick="digichain.updateChainMode('pitched')">
+                                        <i class="gg-arrows-v" aria-hidden="true"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <input id="pitchedChainLength" type="number" min="0.001" step="0.001"
+                                   title="Target sample length in seconds for pitched chains."
+                                   aria-label="Pitched sample length in seconds"
+                                   onchange="digichain.updatePitchedChainLength(this.value)" disabled><span class="chain-length-unit">s</span>
+                        </div>
+                        <div class="chain-secondary-controls">
+                            <button title="When enabled, created chains will be added to the top of the sample list instead of producing a zip file to download (the same as holding the Shift key will pressing the Chain button)."
+                                    class="button-clear toggle-top-list fade" onclick="digichain.updateUiButtonAction('updateResampleChainsToList', '.toggle-top-list', true)"><i class="gg-top-list"></i>
+                            </button>
+                            <select id="presetBundlingSelect" title="Preset bundling options. SL: Slice Markers (Default), TV: Tonverk, XY: OP-XY, DT: Digitakt 2."
+                                    onchange="digichain.changePresetBundling(this.value)">
+                                <option value="sl" title="Slice Markers (Default)">SL</option>
+                                <option value="tv" title="Tonverk Preset bundling (up to 84 slices, elmulti)">TV</option>
+                                <option value="xy" title="OP-XY Preset bundling (up to 24 slices, truncated to 20s)">XY</option>
+    <!--                            <option value="dt" title="Digitakt 2 Preset bundling (up to 64 slices, dtpreset)">DT</option>-->
+                            </select>
+                        </div>
                     </div>
                 </div>
                 <a id="getJoined">_</a>
